@@ -39,9 +39,9 @@ def model_comparison():
         ax.grid(True, axis="y", alpha=.25)
     fig.legend(handles=[Patch(color="#2563eb", label="Selected: Logistic Regression"),
                         Patch(color="#94a3b8", label="Other models")],
-               loc="upper center", ncol=2, frameon=False, bbox_to_anchor=(.5, .94))
-    fig.suptitle("Five-fold trip-grouped model comparison", fontsize=15, weight="bold", y=1.02)
-    fig.tight_layout()
+               loc="upper center", ncol=2, frameon=False, bbox_to_anchor=(.5, .92))
+    fig.suptitle("Five-fold trip-grouped model comparison", fontsize=15, weight="bold", y=.98)
+    fig.tight_layout(rect=[0, .12, 1, .84])
     fig.savefig(OUT / "08_model_comparison.png", dpi=170, bbox_inches="tight")
     plt.close(fig)
 
