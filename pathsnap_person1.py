@@ -5,6 +5,7 @@ DATA_ROOT contains train/ and student_test/ trip folders.
 """
 from __future__ import annotations
 import csv, math, pathlib, sys
+from bisect import bisect_left
 from collections import defaultdict
 
 CELL_M = 100.0
@@ -62,7 +63,12 @@ def point_segment_distance(x,y,s):
     return math.hypot(x-(x1+t*dx),y-(y1+t*dy))
 
 
-def nearby(x,y,grid,radius=CANDIDATE_RADIUS_M):
+def point_segment_fraction(x,y,s):
+    _,x1,y1,dx,dy,den,*_=s
+    return max(0.0,min(1.0,((x-x1)*dx+(y-y1)*dy)/den)) if den else 0.0
+
+
+def nearby(x,y,grid,radius=CANDIDATE_RADIUS_M,limit=MAX_CANDIDATES):
     gx=math.floor(x/CELL_M); gy=math.floor(y/CELL_M); cells=math.ceil(radius/CELL_M)+1
     found={}
     for a in range(gx-cells,gx+cells+1):
@@ -72,7 +78,49 @@ def nearby(x,y,grid,radius=CANDIDATE_RADIUS_M):
     scored=[(point_segment_distance(x,y,s),s) for s in found.values()]
     scored=[z for z in scored if z[0]<=radius]
     scored.sort(key=lambda z:z[0])
-    return scored[:MAX_CANDIDATES]
+    return scored[:limit] if limit is not None else scored
+
+
+def align_route_observations(points, route, route_segments, route_grid):
+    """Greedy monotone alignment with a distance-based progress window.
+
+    The progress window prevents a GPS point near a later crossing of the route
+    from jumping hundreds of route arcs forward and stranding later observations.
+    """
+    positions=defaultdict(list)
+    for i,aid in enumerate(route): positions[aid].append(i)
+    cumulative=[0.0]
+    for seg in route_segments: cumulative.append(cumulative[-1]+seg[6])
+    aligned=[]; last=0; last_progress=0.0
+    for i,(x,y,t) in enumerate(points):
+        prev=points[i-1] if i else None
+        dt=max(0.0,t-prev[2]) if prev else 0.0
+        displacement=math.hypot(x-prev[0],y-prev[1]) if prev else 0.0
+        max_progress=max(100.0,displacement*2.0+30.0*dt)
+        # Bound pathological timestamp gaps without letting alignment jump to the
+        # end of a route in one step.
+        max_progress=min(max_progress,2000.0)
+        choices=nearby(x,y,route_grid,radius=200.0,limit=None)
+        valid=[]
+        for dist,seg in choices:
+            poslist=positions[seg[0]]
+            k=0 if i==0 else bisect_left(poslist,last)
+            while k<len(poslist):
+                pos=poslist[k]
+                progress=cumulative[pos]+point_segment_fraction(x,y,seg)*seg[6]
+                advance=progress-last_progress
+                if i==0 or (-20.0<=advance<=max_progress):
+                    score=dist+0.05*abs(advance-displacement)
+                    valid.append((score,dist,pos,progress))
+                    break
+                if advance>max_progress:break
+                k+=1
+        if valid:
+            _,dist,pos,progress=min(valid)
+            aligned.append((pos,dist));last=pos;last_progress=max(last_progress,progress)
+        else:
+            aligned.append((None,float('inf')))
+    return aligned
 
 
 def load_trip(folder):
@@ -96,23 +144,7 @@ def process_trip(folder, partition):
     allseg=build_segments(nodes,arcs,lat0)
     route_seg=[allseg[a] for a in route]
     route_grid=spatial_index(route_seg)
-    route_positions=defaultdict(list)
-    for pos, aid in enumerate(route): route_positions[aid].append(pos)
-    # Find the closest route arc for each observation, then enforce nondecreasing route order.
-    aligned=[]; last=-1
-    for x,y,_ in points:
-        choices=nearby(x,y,route_grid,radius=200.0)
-        if not choices: aligned.append((None,float('inf'))); continue
-        # Choose only route positions that do not move backwards in the reference.
-        valid=[]
-        for dist,s in choices:
-            pos=next((i for i in route_positions[s[0]] if i>=last), None)
-            if pos is not None: valid.append((dist,pos))
-        if valid:
-            dist,pos=min(valid,key=lambda z:z[0]); last=pos
-        else:
-            pos=None; dist=float('inf')
-        aligned.append((pos,dist))
+    aligned=align_route_observations(points,route,route_seg,route_grid)
     # Use a grid for candidate road arcs; keep candidate IDs trip-local.
     road_grid=spatial_index(allseg)
     rows=[]
@@ -137,7 +169,8 @@ def main():
     if part not in ('train','student_test'): raise SystemExit('partition must be train or student_test')
     folders=sorted(p for p in (root/part).iterdir() if p.is_dir())
     out.mkdir(parents=True,exist_ok=True); summaries=[]; fieldnames=None
-    dest=out/f'{part}_candidates.csv'
+    filename=sys.argv[4] if len(sys.argv)>4 else f'{part}_candidates.csv'
+    dest=out/filename
     with open(dest,'w',newline='',encoding='utf-8') as f:
         writer=None
         for folder in folders:

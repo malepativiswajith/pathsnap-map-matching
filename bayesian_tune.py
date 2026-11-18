@@ -53,11 +53,11 @@ def main():
         result=objective(x,folds);result['trial']=i+1;rows.append(result);xs.append(x);ys.append(result['mean_top1'])
         print(f"Trial {i+1}/{N_TRIALS}: C={result['C']:.6g}, CV top1={result['mean_top1']:.4f} +/- {result['std_top1']:.4f}",flush=True)
     OUT.mkdir(exist_ok=True)
-    with (OUT/'bayesian_trials.csv').open('w',newline='',encoding='utf-8') as f:
+    with (OUT/'bayesian_trials_aligned.csv').open('w',newline='',encoding='utf-8') as f:
         fields=['trial','C','log10_C','mean_top1','std_top1','mean_train_seconds','fold_scores'];w=csv.DictWriter(f,fieldnames=fields);w.writeheader()
         for r in rows:w.writerow({**r,'fold_scores':';'.join(f'{v:.6f}' for v in r['fold_scores'])})
     best=max(rows,key=lambda r:r['mean_top1'])
-    with (OUT/'bayesian_best.txt').open('w',encoding='utf-8') as f:
+    with (OUT/'bayesian_best_aligned.txt').open('w',encoding='utf-8') as f:
         f.write(f"Best C: {best['C']:.8g}\nBest 3-fold grouped CV observation top-1 accuracy: {best['mean_top1']:.6f} +/- {best['std_top1']:.6f}\nTrials: {N_TRIALS}\nSearch: Gaussian-process Bayesian optimization over log10(C) in [-3,3], 4 initial points then expected improvement.\nObjective: mean observation-level top-1 accuracy.\nPartitions: training trips only; student-test and evaluator-test were not used. Labels are heuristic route alignments.\n")
-    print('Best:',best,flush=True);print('Saved features/bayesian_trials.csv and features/bayesian_best.txt',flush=True)
+    print('Best:',best,flush=True);print('Saved features/bayesian_trials_aligned.csv and features/bayesian_best_aligned.txt',flush=True)
 if __name__=='__main__':main()

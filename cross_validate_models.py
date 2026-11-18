@@ -4,6 +4,8 @@ import numpy as np
 from sklearn.model_selection import GroupKFold
 from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier, HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import accuracy_score, f1_score, log_loss
 from train_models import DATA, OUT, FEATURES, SEED, load, downsample
@@ -19,7 +21,7 @@ def metrics(model,X,y,obs):
 
 def make_models():
     return {
-      'Logistic Regression':LogisticRegression(max_iter=250,solver='lbfgs'),
+      'Logistic Regression':make_pipeline(StandardScaler(),LogisticRegression(C=1.0,max_iter=300,solver='lbfgs')),
       'Decision Tree':DecisionTreeClassifier(max_depth=16,min_samples_leaf=20,class_weight='balanced',random_state=SEED),
       'Random Forest':RandomForestClassifier(n_estimators=80,max_depth=16,min_samples_leaf=5,max_features='sqrt',class_weight='balanced_subsample',n_jobs=-1,random_state=SEED),
       'Extra Trees':ExtraTreesClassifier(n_estimators=80,max_depth=16,min_samples_leaf=5,max_features='sqrt',class_weight='balanced',n_jobs=-1,random_state=SEED),
@@ -36,17 +38,17 @@ def main():
             m=metrics(model,X[va],y[va],obs[va]); m.update(model=name,fold=fold,train_seconds=train_s)
             folds.append(m); print(name, 'top1',round(m['observation_top1_accuracy'],4),'macroF1',round(m['candidate_macro_f1'],4),flush=True)
     OUT.mkdir(exist_ok=True)
-    with (OUT/'group_cv_folds.csv').open('w',newline='',encoding='utf-8') as f:
+    with (OUT/'group_cv_folds_aligned.csv').open('w',newline='',encoding='utf-8') as f:
         w=csv.DictWriter(f,fieldnames=list(folds[0]));w.writeheader();w.writerows(folds)
     fields=['model','observation_top1_mean','observation_top1_std','candidate_macro_f1_mean','candidate_macro_f1_std','candidate_log_loss_mean','candidate_log_loss_std','train_seconds_mean','inference_ms_per_observation_mean']
     summary=[]
     for name in dict.fromkeys(r['model'] for r in folds):
         rr=[r for r in folds if r['model']==name]
         summary.append({'model':name,'observation_top1_mean':np.mean([r['observation_top1_accuracy'] for r in rr]),'observation_top1_std':np.std([r['observation_top1_accuracy'] for r in rr]),'candidate_macro_f1_mean':np.mean([r['candidate_macro_f1'] for r in rr]),'candidate_macro_f1_std':np.std([r['candidate_macro_f1'] for r in rr]),'candidate_log_loss_mean':np.mean([r['candidate_log_loss'] for r in rr]),'candidate_log_loss_std':np.std([r['candidate_log_loss'] for r in rr]),'train_seconds_mean':np.mean([r['train_seconds'] for r in rr]),'inference_ms_per_observation_mean':np.mean([r['inference_ms_per_observation'] for r in rr])})
-    with (OUT/'group_cv_summary.csv').open('w',newline='',encoding='utf-8') as f:
+    with (OUT/'group_cv_summary_aligned.csv').open('w',newline='',encoding='utf-8') as f:
         w=csv.DictWriter(f,fieldnames=fields);w.writeheader();w.writerows(summary)
-    with (OUT/'group_cv_protocol.txt').open('w',encoding='utf-8') as f:
+    with (OUT/'group_cv_protocol_aligned.txt').open('w',encoding='utf-8') as f:
         f.write('5-fold GroupKFold, groups=trip_id, data=80 training trips only. Up to four negative candidates sampled per labeled observation in each training fold, random seed 42+fold. Validation rows are not downsampled. Labels are heuristic route alignment; no student-test or evaluator-test data used.\n')
     for r in summary: print(r,flush=True)
-    print('Saved features/group_cv_folds.csv and features/group_cv_summary.csv',flush=True)
+    print('Saved features/group_cv_folds_aligned.csv and features/group_cv_summary_aligned.csv',flush=True)
 if __name__=='__main__':main()

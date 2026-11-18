@@ -6,11 +6,13 @@ import csv, pathlib, random, time
 import numpy as np
 from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier, HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import accuracy_score, f1_score, log_loss
 
 ROOT=pathlib.Path(__file__).resolve().parent
-DATA=ROOT/'features'/'train_candidates.csv'
+DATA=ROOT/'features'/'train_candidates_aligned.csv'
 OUT=ROOT/'features'
 # Never feed alignment-only fields (route_alignment_dist_m / aligned_route_arc_id)
 # into the model: those depend on server-side reference labels and are unavailable at inference.
@@ -59,7 +61,7 @@ def main():
     nval=max(1,round(.2*len(trips))); valtrips=set(trips[:nval]); valmask=np.isin(g,list(valtrips)); trmask=~valmask
     Xtr,ytr,gtr=downsample(X[trmask],y[trmask],g[trmask],obs[trmask]); Xv,yv,gv,obsv,rv=X[valmask],y[valmask],g[valmask],obs[valmask],routes[valmask]
     models={
-      'Logistic Regression':LogisticRegression(max_iter=250,solver='lbfgs',class_weight=None,n_jobs=None),
+      'Logistic Regression':make_pipeline(StandardScaler(),LogisticRegression(C=1.0,max_iter=300,solver='lbfgs')),
       'Decision Tree':DecisionTreeClassifier(max_depth=16,min_samples_leaf=20,class_weight='balanced',random_state=SEED),
       'Random Forest':RandomForestClassifier(n_estimators=80,max_depth=16,min_samples_leaf=5,max_features='sqrt',class_weight='balanced_subsample',n_jobs=-1,random_state=SEED),
       'Extra Trees':ExtraTreesClassifier(n_estimators=80,max_depth=16,min_samples_leaf=5,max_features='sqrt',class_weight='balanced',n_jobs=-1,random_state=SEED),
@@ -74,10 +76,10 @@ def main():
         results.append(m); print(name, {k:round(v,4) if isinstance(v,float) else v for k,v in m.items()},flush=True)
     OUT.mkdir(exist_ok=True)
     fields=list(results[0])
-    with (OUT/'initial_model_comparison.csv').open('w',newline='',encoding='utf-8') as f:
+    with (OUT/'initial_model_comparison_aligned.csv').open('w',newline='',encoding='utf-8') as f:
         w=csv.DictWriter(f,fieldnames=fields);w.writeheader();w.writerows(results)
-    with (OUT/'model_split.txt').open('w',encoding='utf-8') as f:
+    with (OUT/'model_split_aligned.txt').open('w',encoding='utf-8') as f:
         f.write('Seed 42; 80%/20% grouped trip holdout. Validation trips: '+', '.join(sorted(valtrips))+'\n')
         f.write('Source labels are heuristic spatial route alignment; results are provisional. Student-test and evaluator-test partitions were not used.\n')
-    print('Saved features/initial_model_comparison.csv and features/model_split.txt')
+    print('Saved features/initial_model_comparison_aligned.csv and features/model_split_aligned.txt')
 if __name__=='__main__': main()
