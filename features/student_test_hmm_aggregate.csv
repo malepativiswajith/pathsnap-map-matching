@@ -1,0 +1,7 @@
+metric,value,definition
+classifier_weighted_top1_all_route_labeled,0.763345,Correct road candidate predictions / all 18846 route-labeled observations; misses counted incorrect
+hmm_weighted_top1_all_route_labeled,0.815505,Correct Viterbi arc predictions / all 18846 route-labeled observations; misses counted incorrect
+classifier_macro_top1_by_trip_all_route_labeled,0.790581,Mean per-trip classifier Top-1 after candidate misses are counted incorrect
+hmm_macro_top1_by_trip_all_route_labeled,0.844470,Mean per-trip HMM Top-1 after candidate misses are counted incorrect
+classifier_mean_continuity,0.867925,Mean continuity of classifier path across decoded adjacent observations
+hmm_mean_continuity,0.994671,Mean continuity of HMM path across decoded adjacent observations

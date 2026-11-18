@@ -6,9 +6,10 @@ venv/
 /features/*_candidates*.csv
 /features/student_test_hmm_predictions*.csv
 *.joblib
+!/models/logistic_candidate_model.joblib
 *.pkl
 *.pickle
-/reports/*.pdf
+!/reports/PathSnap_Hackathon_Report.pdf
 /reports/maps/*.html
 .DS_Store
 Thumbs.db

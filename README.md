@@ -1,10 +1,25 @@
 # PathSnap: GPS Trajectory Map Matching
 
-PathSnap scores nearby directed road segments for each noisy GPS observation, then uses an HMM/Viterbi decoder to reconstruct a connected route. A FastAPI service exposes predictions to the browser interface in `api/static/index.html`.
+PathSnap scores nearby directed road segments for noisy GPS observations and uses an HMM/Viterbi decoder to reconstruct a connected route. A FastAPI server serves predictions to the browser interface in `api/static/index.html`.
 
-## Data setup
+## Final results
 
-Keep the supplied dataset local. Put it under `data/` with one folder per trip and each trip's `.track`, `.nodes`, `.arcs`, and `.route` files inside it:
+Scores use heuristic route-to-GPS labels and are provisional; see [FINAL_MODEL_DECISION.md](FINAL_MODEL_DECISION.md) for the protocol and caveats.
+
+| Measure | Result |
+| --- | ---: |
+| Five-fold grouped CV Top-1, Logistic Regression | 75.63% +/- 2.87 percentage points |
+| Five-fold grouped CV Top-1, next-best Extra Trees | 75.61% +/- 2.61 percentage points |
+| Bayesian search selection | Logistic Regression `C=1`; no material gain over default |
+| Student-test Top-1, all 18,846 labeled observations | 76.33% |
+| Student-test observations with no positive candidate | 190 / 18,846 (1.01%) |
+| Student-test HMM weighted Top-1 | 81.55% (classifier-only: 76.33%) |
+
+The model, aggregate result summaries, and report are included. Raw data, evaluator labels, large feature tables, per-observation predictions, and the coordinate-bearing Folium map remain local. The evaluator partition was not used for fitting, feature selection, model choice, or tuning.
+
+## Data placement
+
+Keep the supplied dataset local under `data/`. Each partition contains one folder per trip with `.track`, `.nodes`, `.arcs`, and `.route` files:
 
 ```text
 data/
@@ -12,8 +27,6 @@ data/
   student_test/
   evaluator_test/
 ```
-
-Raw data, evaluator labels, generated model weights, large candidate tables, and per-observation predictions are not included in this source-only repository. Do not use the evaluator partition in development or tuning.
 
 ## Install
 
@@ -23,9 +36,9 @@ Use Python 3.10 or newer:
 python -m pip install -r requirements.txt
 ```
 
-## Build locally
+## Reproduce the pipeline
 
-Run from the repository root. These commands create local feature tables and a model artifact used by the API:
+Run from the repository root. Candidate tables are large and ignored by Git; the commands below rebuild them locally.
 
 ```powershell
 python pathsnap_person1.py ".\data" ".\features" train train_candidates_aligned.csv
@@ -39,28 +52,30 @@ python evaluate_student_test.py
 python hmm_decode.py
 ```
 
-The classifier uses seven inference-time features: time delta, GPS speed, candidate distance, road-segment length, GPS movement bearing, road bearing, and bearing difference. It excludes route IDs, route-alignment distance, and reference labels. The training code compares Logistic Regression, Decision Tree, Random Forest, Extra Trees, and Hist Gradient Boosting, with trip-grouped validation and Bayesian tuning of Logistic Regression's `C`.
+The classifier uses seven inference-time features: time delta, GPS speed, candidate distance, road-segment length, GPS movement bearing, road bearing, and bearing difference. Route IDs, route-alignment distances, and reference labels are excluded from the model inputs. Training compares Logistic Regression, Decision Tree, Random Forest, Extra Trees, and Hist Gradient Boosting with trip-grouped validation.
 
-## Generate an interactive map
+Use result files ending in `_aligned` under `features/` as the current summaries. Files without that suffix in the initial repository are superseded drafts from before the route-alignment correction.
 
-After running `hmm_decode.py`, create a Folium map for one student-test trip:
+## Folium map
+
+After `hmm_decode.py`, render a local map for a student-test trip:
 
 ```powershell
 python render_trip_map.py --trip-id TRIP_ID
 ```
 
-The map shows the observed GPS trace and predicted directed road segments. Its OpenStreetMap background needs an internet connection when viewed.
+It shows the GPS trace and predicted road segments. The HTML includes trip coordinates and is therefore ignored by Git. The OpenStreetMap tile background needs internet when the map is opened.
 
 ## Two-laptop demo
 
-On Laptop 1, put the evaluation partition under `data/evaluator_test/`, then run:
+On Laptop 1, place the evaluator partition under `data/evaluator_test/`, then start the service:
 
 ```powershell
 $env:PATHSNAP_PARTITION = "evaluator_test"
 uvicorn api.app:app --host 0.0.0.0 --port 8000
 ```
 
-On Laptop 2, open `http://LAPTOP1-IP:8000/`, set the API address to Laptop 1's IP, choose a trip, and request a route. Both laptops must be on the same network. The API reads reference routes only on Laptop 1 after inference and returns no reference labels to the UI.
+On Laptop 2, open `http://LAPTOP1-IP:8000/`, set the API address to Laptop 1's IP, choose a trip, and request a route. Both laptops must share a network. The API reads reference routes server-side only after inference and returns no reference labels to the UI.
 
 ## Team responsibilities
 
@@ -71,4 +86,4 @@ On Laptop 2, open `http://LAPTOP1-IP:8000/`, set the API address to Laptop 1's I
 
 ## Label limitations
 
-Route labels are generated by a monotone spatial-alignment heuristic with a 50 m maximum labeling distance. The metrics produced by the scripts measure agreement with these heuristic labels; they should be described as provisional until the alignment is independently reviewed.
+Route labels are generated by a monotone spatial-alignment heuristic with a 50 m maximum labeling distance. Some training trips have large unlabeled portions. Scores measure agreement with these heuristic labels, not independently verified ground truth; describe them as provisional.
