@@ -1,0 +1,20 @@
+# Python cache and virtual environments
+__pycache__/
+.venv/
+venv/
+
+# Supplied dataset: do not publish student or evaluator data
+/data/
+
+# Large derived candidate table; regenerate from the source script
+/features/*_candidates.csv
+
+# Local model artifacts (include the final selected artifact only if required)
+*.joblib
+*.pkl
+*.pickle
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
