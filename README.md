@@ -59,13 +59,21 @@ Use files ending in `_aligned` under `features/` as the current summaries. Files
 
 ## Folium map
 
-After `hmm_decode.py`, render a local map for a student-test trip:
+After `hmm_decode.py`, render a local evaluation map for a student-test trip:
 
 ```powershell
 python render_trip_map.py --trip-id TRIP_ID
 ```
 
-It shows the GPS trace and predicted road segments. The HTML includes trip coordinates and is therefore ignored by Git. The OpenStreetMap tile background needs internet when the map is opened.
+The layer control toggles the GPS trace, nearby road network, reference route, and HMM-predicted route. These local HTML files contain trip coordinates and are ignored by Git. The OpenStreetMap tile background needs internet when the map is opened.
+
+Create three training EDA maps for short, median, and long trips, each with GPS, road-network, and reference-route layers:
+
+```powershell
+python create_eda_folium_maps.py --data-root .\data
+```
+
+The HTML maps are written to `reports/maps/` and stay local.
 
 ## Two-laptop demo
 
@@ -82,7 +90,7 @@ On Laptop 2, open `http://LAPTOP1-IP:8000/`, set the API address to Laptop 1's I
 
 See [docs/TEAM_DEMO_GUIDE.md](docs/TEAM_DEMO_GUIDE.md) for the role-by-role walkthrough, data and CSV explanations, model rationale, chart guide, limitations, judge Q&A, and two-laptop demo checklist. Generate the train/student-test EDA charts with `python eda.py --data-root .\data --output-dir .\eda`, and the aggregate model/HMM charts with `python plot_results.py`.
 
-- **Person 1 - Data and features:** `pathsnap_person1.py`, alignment review, and data quality.
+- **Person 1 - Data and features:** `pathsnap_person1.py`, `eda.py`, `create_eda_folium_maps.py`, alignment review, and data quality.
 - **Person 2 - Models:** five-model comparison, grouped CV, Bayesian tuning, and final model training.
 - **Person 3 - Route decoding:** HMM/Viterbi logic in `hmm_decode.py`.
 - **Person 4 - Demo integration:** `api/app.py`, browser UI, and two-laptop setup.

@@ -54,7 +54,7 @@ The API runs inference first. It reads a reference route on the server only afte
 
 **What this role owns:** trip/data checks, coordinate projection, candidate generation, label alignment, feature-table definition, candidate misses, EDA/report section 2.2, and Folium EDA maps if required by the judging rubric.
 
-**Main files:** [`pathsnap_person1.py`](../pathsnap_person1.py), [`eda.py`](../eda.py), and generated files in `eda/`.
+**Main files:** [`pathsnap_person1.py`](../pathsnap_person1.py), [`eda.py`](../eda.py), [`create_eda_folium_maps.py`](../create_eda_folium_maps.py), and generated files in `eda/`.
 
 **What the current implementation does:**
 
@@ -65,6 +65,7 @@ The API runs inference first. It reads a reference route on the server only afte
 - Aligns the GPS sequence monotonically to the reference route. A route label is kept only when the alignment distance is at most 50 m.
 - Creates the seven model features described below, plus metadata and label-only columns.
 - The current EDA script reads `train` and `student_test` only. It deliberately does not open `evaluator_test`.
+- `create_eda_folium_maps.py` builds local short-, median-, and long-trip training maps with separate GPS, nearby-road-network, and reference-route layers. It writes coordinate-bearing HTML only under `reports/maps/`, which Git ignores.
 
 **Important results to report:**
 
@@ -138,7 +139,7 @@ The tuned Extra Trees HMM result improved weighted Top-1 by 0.65 percentage poin
 
 **Student-test aggregate result for the selected tuned Extra Trees model:** weighted all-label Top-1 increased from 76.03% (classifier only) to 82.20% (classifier + HMM). Mean Top-1 across the 10 trips increased from 78.80% to 85.19%. Mean continuity across decoded adjacent observations was 99.50%. The HMM did not improve every individual trip, and these fixed transition penalties were not separately nested-tuned.
 
-**What the maps show:** the browser UI draws the GPS trace as dashed blue with a white outline, the predicted road route in red, and green/purple start/end markers. The current offline Folium renderer shows the GPS trace and HMM-predicted arcs; it does not currently add the full road-network or reference-route layers, so do not claim those are in the saved Folium map. The EDA script creates statistical charts, not a Folium EDA map. If the rubric checks for those Folium maps/layers specifically, those artifacts still need to be added. Keep coordinate-bearing HTML maps local.
+**What the maps show:** the browser UI draws the GPS trace as dashed blue with a white outline, the predicted road route in red, and green/purple start/end markers. `render_trip_map.py` also provides toggleable local Folium layers for the GPS trace, nearby road network, reference route, and HMM-predicted route. `create_eda_folium_maps.py` builds training EDA maps with GPS, road-network, and reference-route layers. Both scripts save coordinate-bearing HTML under `reports/maps/`; keep those files local and do not upload them.
 
 ### Person 4 — API, UI, deployment, and integration
 
