@@ -17,7 +17,7 @@ flowchart LR
   A[Noisy GPS points] --> B[Local metre projection]
   R[Road nodes and directed arcs] --> B
   B --> C[Nearby candidate arcs]
-  C --> D[Seven-feature Logistic Regression]
+  C --> D[Seven-feature Extra Trees candidate scorer]
   D --> E[HMM / Viterbi route decoder]
   E --> F[FastAPI]
   F --> G[Browser map: GPS and predicted route]
@@ -83,7 +83,7 @@ EDA found no invalid GPS coordinates, invalid timestamps, or invalid arc endpoin
 
 **What this role owns:** training five model families, grouped evaluation, the chosen model, hyperparameter search, comparison plots, and report sections 3 and 4.
 
-**Main files:** [`train_models.py`](../train_models.py), [`cross_validate_models.py`](../cross_validate_models.py), [`bayesian_tune.py`](../bayesian_tune.py), [`compare_tuned.py`](../compare_tuned.py), [`train_final_model.py`](../train_final_model.py), [`evaluate_student_test.py`](../evaluate_student_test.py), and [`plot_results.py`](../plot_results.py).
+**Main files:** [`train_models.py`](../train_models.py), [`cross_validate_models.py`](../cross_validate_models.py), [`bayesian_tune_extratrees.py`](../bayesian_tune_extratrees.py), [`compare_student_models.py`](../compare_student_models.py), [`train_final_model.py`](../train_final_model.py), and [`plot_results.py`](../plot_results.py).
 
 **The five models compared:**
 
@@ -95,9 +95,9 @@ EDA found no invalid GPS coordinates, invalid timestamps, or invalid arc endpoin
 | Extra Trees | Randomized tree ensemble; useful comparison against Random Forest. |
 | Histogram Gradient Boosting | Boosted trees can model nonlinear feature interactions and often give strong probabilities. |
 
-The final artifact is **StandardScaler + Logistic Regression**, with `C=1`, `max_iter=300`, and `lbfgs`. `C` is inverse regularization strength: smaller values constrain the coefficients more; larger values allow a more flexible fit. Scaling is important because distance, time, and angular features have different numeric ranges.
+The final artifact is **Extra Trees**, with `n_estimators=160`, `max_depth=16`, `min_samples_leaf=10`, `max_features="sqrt"`, and `class_weight="balanced"`. Each tree uses randomized feature/split choices; averaging trees provides a nonlinear candidate probability score without requiring feature scaling. The HMM/Viterbi decoder uses those probabilities plus directed-arc connectivity to reconstruct a sequence.
 
-**Why Logistic Regression was selected:** observation-level Top-1 is the primary task metric: among the candidate roads for one observation, did the highest-scoring road match the aligned reference arc? In five-fold `GroupKFold`, the entire trip is assigned to one fold, so observations from the same trip never appear on both sides of a fold.
+**How the model was selected:** five-fold `GroupKFold` keeps entire trips together. The final goal is route reconstruction, so we compared both candidate ranking and classifier-plus-HMM route scores. The allowed 10-trip student-test partition was used for development-stage comparison and informed the selection; it is therefore not an untouched final benchmark. The 10 evaluator trips were not used for model selection or tuning.
 
 | Model | Observation Top-1, mean ± std | Candidate macro F1 | Candidate log loss |
 | --- | ---: | ---: | ---: |
@@ -107,38 +107,26 @@ The final artifact is **StandardScaler + Logistic Regression**, with `C=1`, `max
 | Random Forest | 73.89% ± 2.85 pp | 0.7877 | 0.2944 |
 | Decision Tree | 70.42% ± 3.40 pp | 0.7518 | 0.6472 |
 
-Logistic Regression and Extra Trees are effectively tied on Top-1. Logistic Regression was retained because it is simpler, has better candidate macro F1 and log loss than Extra Trees in this run, and its recorded inference time was roughly nine times lower. Hist Gradient Boosting wins on candidate macro F1 and log loss, but it is weaker on the primary observation Top-1 metric. These timings depend on the machine and software environment.
+**Bayesian tuning:** a 10-trial Gaussian-process expected-improvement search optimized observation Top-1 with three `GroupKFold` splits using training trips only. It selected 160 trees, depth 16, minimum leaf size 10, square-root feature sampling, and balanced class weights. The result was 75.89% ± 2.76 pp, compared with about 75.76% for untuned Extra Trees and 75.62% for Logistic Regression on the same three screening folds. The tuning gain is modest.
 
-**Bayesian search:** a small Gaussian-process search tested 10 values of `C` over `10^-3` to `10^3` using three trip-grouped folds on training trips. It selected `C=1`, with 75.62% ± 3.08 pp mean Top-1. The tuned comparison is effectively identical to untuned `C=1`; do not claim tuning improved the score.
+**Hist Gradient Boosting check:** this boosted-tree model was included in the five-family comparison and evaluated on the same student-test trips. It led the candidate-level metrics (macro F1 0.8136; log loss 0.2340), but its HMM weighted route Top-1 was 79.62%. Tuned Extra Trees had lower candidate F1 and worse log loss, but the highest HMM weighted route Top-1 (82.20%) and macro-by-trip score (85.19%) in this development comparison. Thus Extra Trees is selected for the route reconstruction objective; if candidate probability quality becomes the objective, Hist Gradient Boosting is a strong alternative.
 
-**Teacher’s question about stronger models:** Logistic Regression is a basic model, but the project did not compare it only with basic models. Hist Gradient Boosting is a boosted-tree ensemble and was the strongest of the five on candidate macro F1 and log loss. We also screened two nearby Hist Gradient Boosting settings on the same three trip-grouped folds as Logistic Regression. This quick screen is supplementary; the saved five-fold summary remains the primary comparison.
+| Student-test model | Candidate macro F1 | Candidate log loss | Classifier Top-1 | HMM weighted Top-1 | HMM mean by trip |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Logistic Regression | 0.7955 | 0.2706 | 76.33% | 81.55% | 84.45% |
+| Decision Tree | 0.7474 | 0.6371 | 69.74% | 76.33% | 78.33% |
+| Random Forest | 0.7816 | 0.3088 | 73.36% | 80.02% | 82.53% |
+| Extra Trees, untuned | 0.7517 | 0.3747 | 75.83% | 81.68% | 84.80% |
+| Hist Gradient Boosting | **0.8136** | **0.2340** | 73.73% | 79.62% | 82.21% |
+| Extra Trees, Bayesian tuned | 0.7495 | 0.3832 | **76.03%** | **82.20%** | **85.19%** |
 
-| Model from the review-only three-fold screen | Observation Top-1 | Candidate macro F1 | Candidate log loss |
-| --- | ---: | ---: | ---: |
-| Logistic Regression C=1 | 75.62% | 0.7885 | 0.2589 |
-| Extra Trees | 75.75% | 0.7594 | 0.3585 |
-| Hist Gradient Boosting, current settings | 74.60% | **0.8134** | **0.2254** |
-| Hist Gradient Boosting, setting A | 74.62% | 0.8132 | 0.2253 |
-| Hist Gradient Boosting, setting B | 74.25% | 0.8116 | 0.2265 |
-
-The small Extra Trees Top-1 lead in this three-fold screen is only 0.13 percentage points and did not appear as a lead in the saved five-fold summary (Logistic Regression 75.63%, Extra Trees 75.61%). A final student-test route check gave 79.63% weighted Top-1 for Hist Gradient Boosting + HMM versus 81.55% for Logistic Regression + HMM. **Decision: keep Logistic Regression for the current demo** because it is strongest or effectively tied on the route-ranking metric and had the higher end-to-end student-test route score; do not switch just to use a more complex model. Be clear that Hist Gradient Boosting is better on the candidate-level F1/log-loss measures. This does not prove no untested model can do better: XGBoost and CatBoost are not installed in the current environment and were not benchmarked. Any replacement needs the same trip-grouped validation and end-to-end HMM comparison. The student-test check is a development result, not a fresh benchmark.
-
-**Final student-test check:** the final model was trained on the 80 training trips and evaluated on the 10 student-test trips. It achieved 76.33% all-label Top-1, counting the 190 candidate misses as wrong; candidate accuracy was 89.24%, candidate macro F1 0.7955, and candidate log loss 0.2706.
-
-**Candidate-level confusion matrix on student-test** at probability cutoff 0.5 (rows are actual 0/1; columns predicted 0/1):
-
-|  | Predicted negative | Predicted positive |
-| --- | ---: | ---: |
-| Actual negative | 98,634 (TN) | 7,507 (FP) |
-| Actual positive | 5,924 (FN) | 12,732 (TP) |
-
-This matrix answers “did each candidate row get classified as route or not?” It is **not** the same as observation-level Top-1, which ranks all candidates belonging to one GPS point. Candidate misses have no candidate row to classify and are handled separately in all-observation Top-1.
+The tuned Extra Trees HMM result improved weighted Top-1 by 0.65 percentage points versus Logistic Regression + HMM (about 122 of the 18,846 heuristic route labels). It is a development result, not a guaranteed score on evaluator trips. The selected model's candidate confusion matrix at probability threshold 0.5 is TN=87,845, FP=18,296, FN=2,615, TP=16,041. Candidate classification at a threshold is distinct from choosing the highest-scoring candidate for each observation.
 
 ### Person 3 — HMM and Viterbi route reconstruction
 
 **What this role owns:** candidate states, emissions, transitions, handling gaps/missing candidates, route continuity, comparison against the classifier-only path, map layers, and report sections 5 and 6.
 
-**Main files:** [`hmm_decode.py`](../hmm_decode.py), [`render_trip_map.py`](../render_trip_map.py), and the aggregate HMM result in `features/student_test_hmm_aggregate.csv`.
+**Main files:** [`hmm_decode.py`](../hmm_decode.py), [`render_trip_map.py`](../render_trip_map.py), and the selected-model comparison in `features/student_test_model_comparison_aligned.csv`.
 
 **Decoder in plain language:**
 
@@ -148,7 +136,7 @@ This matrix answers “did each candidate row get classified as route or not?”
 - Viterbi accumulates emission plus transition scores over the sequence and uses back-pointers to recover the highest-scoring whole path. It can select a slightly lower-scoring candidate at one point if doing so makes the whole sequence more plausible.
 - Decoding restarts across a missing-candidate observation, a non-consecutive observation index, or a GPS time gap longer than 60 seconds. It does not force a route across an outage.
 
-**Student-test aggregate result:** weighted all-label Top-1 increased from 76.33% (classifier only) to 81.55% (classifier + HMM). Mean Top-1 across the 10 trips increased from 79.06% to 84.45%. Mean continuity across decoded adjacent observations increased from 86.79% to 99.47%. The HMM did not improve every individual trip, and these fixed transition penalties were not separately nested-tuned.
+**Student-test aggregate result for the selected tuned Extra Trees model:** weighted all-label Top-1 increased from 76.03% (classifier only) to 82.20% (classifier + HMM). Mean Top-1 across the 10 trips increased from 78.80% to 85.19%. Mean continuity across decoded adjacent observations was 99.50%. The HMM did not improve every individual trip, and these fixed transition penalties were not separately nested-tuned.
 
 **What the maps show:** the browser UI draws the GPS trace as dashed blue with a white outline, the predicted road route in red, and green/purple start/end markers. The current offline Folium renderer shows the GPS trace and HMM-predicted arcs; it does not currently add the full road-network or reference-route layers, so do not claim those are in the saved Folium map. The EDA script creates statistical charts, not a Folium EDA map. If the rubric checks for those Folium maps/layers specifically, those artifacts still need to be added. Keep coordinate-bearing HTML maps local.
 
@@ -188,8 +176,8 @@ This matrix answers “did each candidate row get classified as route or not?”
 - `pathsnap_person1.py`: `project`, `build_segments`, `spatial_index`, `nearby`, `align_route_observations`, and `process_trip` implement the map-matching data preparation.
 - `train_models.py`: defines the feature list, negative sampling, candidate scoring, and initial trip-grouped holdout comparison.
 - `cross_validate_models.py`: defines all five estimators and the five-fold trip-grouped evaluation.
-- `bayesian_tune.py`: proposes `C` values and evaluates their grouped-fold Top-1 objective.
-- `train_final_model.py`: refits the chosen pipeline using all training trips and writes `models/logistic_candidate_model.joblib`.
+- `bayesian_tune_extratrees.py`: runs a 10-trial Bayesian search over Extra Trees settings with grouped folds from the training trips only.
+- `train_final_model.py`: refits tuned Extra Trees on all training trips and writes `models/extra_trees_candidate_model.joblib`.
 - `hmm_decode.py`: `decode` splits observations into continuous segments, scores transitions, then backtracks through Viterbi pointers.
 - `api/app.py`: `infer` reconstructs candidates from raw trip files, calls `predict_proba`, invokes `decode`, then packages the predicted route for the UI.
 
@@ -208,12 +196,12 @@ Use files ending in `_aligned` for the finalized model results. Earlier files wi
 | `features/group_cv_folds_aligned.csv` | One row per model per validation fold, including candidate accuracy, macro F1, log loss, observation Top-1, training seconds, and inference time. |
 | `features/group_cv_summary_aligned.csv` | One row per model, summarizing the five grouped folds with mean and standard deviation. This is the main comparison table. |
 | `features/group_cv_protocol_aligned.txt` | States the grouping, fold count, negative sampling, and which partitions were excluded. |
-| `features/bayesian_trials_aligned.csv` | One row per tested `C`, with log10(C), mean/std Top-1, training time, and the three fold scores. |
-| `features/bayesian_best_aligned.txt` | Search method, objective, best `C`, and best score. |
-| `features/bayesian_comparison_folds_aligned.csv` | Per-fold comparison for the untuned and Bayesian-selected settings on matched grouped folds. |
-| `features/bayesian_comparison_aligned.csv` | Aggregate comparison of untuned `C=1` and selected `C=1`; the equal result documents that tuning found no gain. |
-| `features/student_test_metrics_aligned.csv` | One-row classifier evaluation on the 10 student-test trips, including all-label Top-1, candidate metrics, training/inference time, and misses. |
-| `features/student_test_hmm_aggregate.csv` | HMM vs classifier aggregates for weighted Top-1, per-trip macro Top-1, and continuity, with metric definitions. |
+| `features/bayesian_trials_aligned.csv`, `features/bayesian_best_aligned.txt`, and `features/bayesian_comparison*.csv` | Earlier Logistic Regression `C` search artifacts. Keep them as baseline experiments; they do not define the selected model. |
+| `features/extra_trees_bayesian_trials_aligned.csv` | One row per Extra Trees search trial; validation folds contain training trips only. |
+| `features/extra_trees_bayesian_best_aligned.txt` | Best Extra Trees configuration and grouped-CV objective score. |
+| `features/student_test_model_comparison_aligned.csv` | Aggregate comparison of five model families plus tuned Extra Trees on the 10 student-test trips, including candidate, HMM route, continuity, and timing metrics. |
+| `features/student_test_metrics_aligned.csv` | One-row evaluation of the selected tuned Extra Trees model, including all-label Top-1, candidate metrics, training/inference time, and misses. |
+| `features/student_test_hmm_aggregate.csv` | Selected-model classifier-vs-HMM aggregates for weighted Top-1, per-trip macro Top-1, and continuity, with metric definitions. |
 
 ### Local files; do not publish them
 
@@ -240,8 +228,10 @@ The current local EDA output is in `eda/`. It was generated from the 80 train an
 | `05_network_quality.png` | Weakly connected component count against isolated-node count, one point per trip; symlog axes. | Isolated nodes are zero in these development trips, while component counts vary. Weak connectivity ignores one-way direction. |
 | `06_candidate_coverage.png` | Route-label coverage and fraction of labeled observations without a positive road candidate by partition. | Candidate misses happen before classification, so they are a preprocessing/coverage issue as well as a limit on the final score. |
 | `07_representative_trajectories.png` | Six training GPS traces centered at their own start point, axes in metres. | Illustrates trip shapes without raw longitude/latitude axes. These are still trajectory-derived visuals; keep the file local. |
-| `08_model_comparison.png` | Five-fold grouped mean Top-1, candidate macro F1, and log loss; error bars show fold standard deviation. Blue marks the selected Logistic Regression; gray bars are alternatives. | Logistic Regression is the selected model on Top-1; Hist Gradient Boosting is strongest on the two candidate-level metrics. |
-| `09_hmm_effect.png` | Classifier-only vs HMM aggregate Top-1 and continuity. | The decoder improves overall route agreement and makes adjacent decoded arcs much more continuous. One aggregate improvement does not mean every trip improved. |
+| `08_model_comparison.png` | Five-fold grouped mean Top-1, candidate macro F1, and log loss; error bars show fold standard deviation. Blue marks the Extra Trees family selected after tuning; gray bars are alternatives. | Logistic Regression and untuned Extra Trees are nearly tied on grouped Top-1; Hist Gradient Boosting leads candidate F1 and log loss. |
+| `09_hmm_effect.png` | Tuned Extra Trees classifier-only vs HMM weighted Top-1, macro-by-trip Top-1, and continuity. | On the student-test development trips, the HMM improves route agreement and continuity; the aggregate result does not mean every trip improved. |
+| `10_student_model_routes.png` | Classifier-only and HMM weighted Top-1 for all six student-test model variants. | Tuned Extra Trees + HMM has the highest route score in this development comparison. |
+| `11_student_candidate_metrics.png` | Candidate macro F1 and log loss across the six student-test model variants. | Hist Gradient Boosting leads candidate classification and probability quality, which are distinct from final route scores. |
 
 **Metric vocabulary:**
 
@@ -286,7 +276,7 @@ Keep the evaluator data on Laptop 1 under `data\evaluator_test\`. `0.0.0.0` make
 ### 4-person presentation flow
 
 1. **Person 1 (about 45 seconds):** explain the files and trip split, why coordinates are projected into metres, how nearby candidates are generated, the seven features, and the 1.01% student-test candidate miss rate.
-2. **Person 2 (about 60 seconds):** show the five-model comparison, explain trip-grouped CV, justify Logistic Regression on observation Top-1, and state honestly that Bayesian tuning selected the same `C=1`.
+2. **Person 2 (about 60 seconds):** show the five-family comparison, explain trip-grouped CV and the separate Bayesian search, then compare tuned Extra Trees + HMM route scores with Hist Gradient Boosting's better candidate F1/log loss. State that student-test results are development metrics.
 3. **Person 3 (about 45 seconds):** explain candidate states, probability emissions, same/connected/disconnected transition scores, the 60-second gap break, and the HMM improvement with its limitations.
 4. **Person 4 (about 60 seconds):** show `/health`, the trip selector, select a trip, reconstruct, identify the map colors, and explain the two-laptop setup and server-side reference labels.
 
@@ -296,13 +286,13 @@ The current repo does not include captured demo screenshots. Person 4 should sav
 
 **Why not choose the geometrically nearest road?** GPS noise, parallel roads, and intersections can make the nearest road wrong at one instant. The model uses distance and movement/road direction, and the HMM uses sequence continuity.
 
-**Why Logistic Regression if boosting has better F1 and log loss?** The primary task metric is observation-level Top-1, where Logistic Regression was best and Extra Trees was effectively tied. Boosting had the strongest candidate-level metrics but lower Top-1. We selected for the route-candidate ranking objective and runtime simplicity.
+**Why Extra Trees if Hist Gradient Boosting has better F1 and log loss?** Candidate F1 and log loss score each candidate row. For the route task, we also compare the decoded route. Tuned Extra Trees had the highest student-test HMM weighted and macro-by-trip Top-1. Hist Gradient Boosting is better on candidate-level metrics. The student-test comparison informed development selection, so it is not an untouched benchmark.
 
-**What does `C=1` mean? Did Bayesian tuning help?** `C` controls inverse regularization strength. The search selected `C=1`, which matched the untuned default; no measurable gain was shown.
+**What did Bayesian tuning change?** It selected 160 trees, depth 16, minimum leaf size 10, square-root feature sampling, and balanced class weights. On three grouped training folds, Top-1 increased modestly from about 75.76% for untuned Extra Trees to 75.89%.
 
 **What does a candidate miss mean?** The correct reference arc was not in the generated candidate list. No classifier can rank a missing candidate, so the miss is counted wrong in all-observation Top-1.
 
-**Is 81.55% the same as the 84.45% HMM score?** No. 81.55% pools all labeled observations, giving long trips more weight. 84.45% averages per-trip accuracies, giving each of 10 trips equal weight.
+**Is 82.20% the same as the 85.19% HMM score?** No. 82.20% pools all labeled observations, giving long trips more weight. 85.19% averages per-trip accuracies, giving each of the 10 trips equal weight.
 
 **Did we use the evaluator labels to train or tune?** No. Training and tuning use the 80 train trips. The 10 student-test trips are a development evaluation. The evaluator partition is selected only for the live API; the route reference is read after inference on Laptop 1 for aggregate scoring.
 
@@ -322,10 +312,9 @@ The current repo does not include captured demo screenshots. Person 4 should sav
 ## 10. File quick index
 
 - **Report:** `reports/PathSnap_Hackathon_Report.pdf`
-- **Final model:** `models/logistic_candidate_model.joblib`
+- **Final model:** `models/extra_trees_candidate_model.joblib`
 - **Role 1:** `pathsnap_person1.py`, `eda.py`, `eda/`
-- **Role 2:** `train_models.py`, `cross_validate_models.py`, `bayesian_tune.py`, `compare_tuned.py`, `train_final_model.py`, `evaluate_student_test.py`, `plot_results.py`, `FINAL_MODEL_DECISION.md`
+- **Role 2:** `train_models.py`, `cross_validate_models.py`, `bayesian_tune_extratrees.py`, `compare_student_models.py`, `train_final_model.py`, `evaluate_student_test.py`, `plot_results.py`, `FINAL_MODEL_DECISION.md`
 - **Role 3:** `hmm_decode.py`, `render_trip_map.py`
 - **Role 4:** `api/app.py`, `api/static/index.html`, `README.md`, `requirements.txt`, `build_report.py`
 - **Shared results:** `features/*_aligned*`; check the public/local tables in section 5 before sharing any file.
-

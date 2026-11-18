@@ -14,7 +14,7 @@ from hmm_decode import decode, GAP_BREAK_S
 
 PARTITION=os.getenv('PATHSNAP_PARTITION','student_test')
 DATA_ROOT=pathlib.Path(os.getenv('PATHSNAP_DATA_ROOT',str(ROOT/'data')))
-MODEL_PATH=pathlib.Path(os.getenv('PATHSNAP_MODEL_PATH',str(ROOT/'models'/'logistic_candidate_model.joblib')))
+MODEL_PATH=pathlib.Path(os.getenv('PATHSNAP_MODEL_PATH',str(ROOT/'models'/'extra_trees_candidate_model.joblib')))
 BUNDLE=joblib.load(MODEL_PATH)
 MODEL=BUNDLE['model']; FEATURES=BUNDLE['features']
 app=FastAPI(title='PathSnap API',version='0.1.0')
@@ -24,7 +24,7 @@ class PredictRequest(BaseModel): trip_id:str
 @app.get('/')
 def home():return FileResponse(pathlib.Path(__file__).parent/'static'/'index.html')
 @app.get('/health')
-def health():return {'status':'ok','partition':PARTITION,'model':'Logistic Regression C=1'}
+def health():return {'status':'ok','partition':PARTITION,'model':'Extra Trees (160 trees, depth 16, leaf 10)'}
 @app.get('/trips')
 def trips():
     folder=DATA_ROOT/PARTITION

@@ -1,9 +1,10 @@
 """Viterbi route decoding and classifier-only comparison on student-test trips."""
 import csv,math,os,pathlib,collections,joblib,numpy as np
 from train_models import ROOT,FEATURES
+from pathsnap_person1 import process_trip
 OUT=ROOT/'features'
 CAND=pathlib.Path(os.getenv('PATHSNAP_STUDENT_CANDIDATES',str(OUT/'student_test_candidates_aligned.csv')))
-MODEL=pathlib.Path(os.getenv('PATHSNAP_MODEL_PATH',str(ROOT/'models'/'logistic_candidate_model.joblib')))
+MODEL=pathlib.Path(os.getenv('PATHSNAP_MODEL_PATH',str(ROOT/'models'/'extra_trees_candidate_model.joblib')))
 DATA=pathlib.Path(os.getenv('PATHSNAP_DATA_ROOT',str(ROOT/'data')))/'student_test'
 GAP_BREAK_S=60.0
 
@@ -66,12 +67,32 @@ def main():
             pos=[x[0] for x in cands if x[2]==1]
             if pos:truth[idx]=pos[0];known[idx]=True
         decoded=decode(obs,arcs)
-        evalidx=[i for i in truth if i in decoded]
-        baseacc=float(np.mean([classifier[i]==truth[i] for i in evalidx]));hmmacc=float(np.mean([decoded[i]==truth[i] for i in evalidx]))
+        _, quality=process_trip(d,'student_test')
+        route_labeled=quality['gps_observations']-quality['unlabeled_observations']
+        base_hits=sum(classifier[i]==aid for i,aid in truth.items())
+        hmm_hits=sum(decoded.get(i)==aid for i,aid in truth.items())
+        candidate_misses=max(0,route_labeled-len(truth))
+        baseacc=base_hits/max(1,route_labeled);hmmacc=hmm_hits/max(1,route_labeled)
         obs_by_idx={x['idx']:x for x in obs}
-        sr={'trip_id':tid,'labeled_observations':len(evalidx),'classifier_top1_accuracy':baseacc,'hmm_top1_accuracy':hmmacc,'classifier_continuity':continuity(classifier,arcs,obs_by_idx),'hmm_continuity':continuity(decoded,arcs,obs_by_idx)};summary.append(sr);print(sr,flush=True)
+        sr={'trip_id':tid,'route_labeled_observations':route_labeled,'candidate_misses':candidate_misses,'classifier_top1_accuracy_all_labels':baseacc,'hmm_top1_accuracy_all_labels':hmmacc,'classifier_continuity':continuity(classifier,arcs,obs_by_idx),'hmm_continuity':continuity(decoded,arcs,obs_by_idx)};summary.append(sr);print(sr,flush=True)
         for i in sorted(decoded):all_rows.append({'trip_id':tid,'obs_idx':i,'classifier_arc_id':classifier[i],'hmm_arc_id':decoded[i],'reference_arc_id':truth.get(i,''),'label_known':int(i in truth)})
     with out.open('w',newline='',encoding='utf-8') as f:w=csv.DictWriter(f,fieldnames=list(all_rows[0]));w.writeheader();w.writerows(all_rows)
     with (OUT/'student_test_hmm_summary_aligned.csv').open('w',newline='',encoding='utf-8') as f:w=csv.DictWriter(f,fieldnames=list(summary[0]));w.writeheader();w.writerows(summary)
-    print('macro means:',{k:float(np.nanmean([r[k] for r in summary])) for k in ['classifier_top1_accuracy','hmm_top1_accuracy','classifier_continuity','hmm_continuity']})
+    macro={k:float(np.nanmean([r[k] for r in summary])) for k in ['classifier_top1_accuracy_all_labels','hmm_top1_accuracy_all_labels','classifier_continuity','hmm_continuity']}
+    total_labels=sum(r['route_labeled_observations'] for r in summary)
+    weighted={k:sum(r['route_labeled_observations']*r[k] for r in summary)/max(1,total_labels) for k in ['classifier_top1_accuracy_all_labels','hmm_top1_accuracy_all_labels']}
+    aggregate={
+        'classifier_weighted_top1_all_route_labeled':weighted['classifier_top1_accuracy_all_labels'],
+        'hmm_weighted_top1_all_route_labeled':weighted['hmm_top1_accuracy_all_labels'],
+        'classifier_macro_top1_by_trip_all_route_labeled':macro['classifier_top1_accuracy_all_labels'],
+        'hmm_macro_top1_by_trip_all_route_labeled':macro['hmm_top1_accuracy_all_labels'],
+        'classifier_mean_continuity':macro['classifier_continuity'],
+        'hmm_mean_continuity':macro['hmm_continuity'],
+    }
+    with (OUT/'student_test_hmm_aggregate.csv').open('w',newline='',encoding='utf-8') as f:
+        w=csv.writer(f);w.writerow(['metric','value','definition'])
+        for key,value in aggregate.items():
+            definition='All heuristic route labels; candidate misses count incorrect.' if 'top1' in key else 'Unweighted mean of per-trip adjacent-arc continuity.'
+            w.writerow([key,value,definition])
+    print('macro means:',macro,'weighted route scores:',weighted)
 if __name__=='__main__':main()
