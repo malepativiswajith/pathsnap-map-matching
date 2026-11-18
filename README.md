@@ -37,9 +37,22 @@ This creates `features/train_candidates.csv`. The generated candidate table is e
 ```powershell
 python train_models.py
 python cross_validate_models.py
+python bayesian_tune.py
+python compare_tuned.py
 ```
 
 These commands use training trips only and split by trip. They write comparison summaries under `features/`. `student_test` is reserved for development-stage evaluation after model selection; evaluator-testing data and labels must remain outside the development pipeline.
+
+## Development evaluation on student-test
+
+After the model and tuning decision is recorded, generate student-test candidates and evaluate the provisional Logistic Regression:
+
+```powershell
+python pathsnap_person1.py ".\data" ".\features" student_test
+python evaluate_student_test.py
+```
+
+The evaluation script fits on training-trip candidates only. It reads student-test reference routes only for offline development metrics; the prediction/API path must never expose those labels to the model or UI. Results are saved in `features/student_test_metrics.csv`. Current student-test metrics are provisional because route-to-GPS labels come from a heuristic alignment.
 
 ## Team work remaining
 
